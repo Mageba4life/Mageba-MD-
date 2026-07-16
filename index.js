@@ -2,8 +2,6 @@ console.log("🚀 Mageba-MD starting...");
 
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require("@whiskeysockets/baileys");
 const pino = require("pino");
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require("@whiskeysockets/baileys");
-const pino = require("pino");
 
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState("session");
@@ -23,7 +21,7 @@ async function startBot() {
     }
 
     if (connection === "close") {
-      console.log("❌ Connection closed:", update.lastDisconnect?.error);
+      console.log("❌ Connection closed");
 
       const shouldReconnect =
         update.lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
