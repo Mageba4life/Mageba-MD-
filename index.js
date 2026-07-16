@@ -1,4 +1,4 @@
-const { default: makeWASocket, useMultiFileAuthState } = require("@whiskeysockets/baileys");
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require("@whiskeysockets/baileys");
 const pino = require("pino");
 
 async function startBot() {
@@ -11,24 +11,25 @@ async function startBot() {
 
   sock.ev.on("creds.update", saveCreds);
 
-  if (!sock.authState?.creds?.registered) {
-    console.log("Bot starting...");
-  }
-
-  sock.ev.on("connection.update", async (update) => {
-    const { connection, qr } = update;
-
-    if (qr) {
-      console.log("QR CODE GENERATED - Check Railway logs");
-    }
+  sock.ev.on("connection.update", (update) => {
+    const { connection } = update;
 
     if (connection === "open") {
-      console.log("✅ Mageba-MD connected successfully!");
+      console.log("✅ Mageba-MD connected!");
     }
 
     if (connection === "close") {
-      console.log("Connection closed, restarting...");
-      startBot();
+      console.log("❌ Connection closed:", update.lastDisconnect?.error);
+
+      const shouldReconnect =
+        update.lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+
+      if (shouldReconnect) {
+        console.log("🔄 Reconnecting...");
+        startBot();
+      } else {
+        console.log("⚠️ Logged out. Pair again.");
+      }
     }
   });
 
