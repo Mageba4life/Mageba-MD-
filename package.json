@@ -1,0 +1,13 @@
+{
+  "name": "mageba-md",
+  "version": "1.0.0",
+  "description": "My WhatsApp bot",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "latest",
+    "pino": "latest"
+  }
+}
