@@ -57,3 +57,7 @@ async function startBot() {
 }
 
 startBot();
+
+setInterval(() => {
+  console.log("💚 Mageba-MD is still running...");
+}, 60000);
