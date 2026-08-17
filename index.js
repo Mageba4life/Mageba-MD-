@@ -1,10 +1,27 @@
+const http = require("http");
+
+const PORT = process.env.PORT || 3000;
+
+http.createServer((req, res) => {
+  res.writeHead(200, { "Content-Type": "text/plain" });
+  res.end("Mageba-MD is running!");
+}).listen(PORT, () => {
+  console.log(`🌐 Web server running on port ${PORT}`);
+});
+
 console.log("🚀 Mageba-MD starting...");
 
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require("@whiskeysockets/baileys");
+const {
+  default: makeWASocket,
+  useMultiFileAuthState,
+  DisconnectReason
+} = require("@whiskeysockets/baileys");
+
 const pino = require("pino");
 
 async function startBot() {
-  const { state, saveCreds } = await useMultiFileAuthState("session");
+  const { state, saveCreds } =
+    await useMultiFileAuthState("session");
 
   const sock = makeWASocket({
     auth: state,
@@ -24,7 +41,8 @@ async function startBot() {
       console.log("❌ Connection closed");
 
       const shouldReconnect =
-        update.lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+        update.lastDisconnect?.error?.output?.statusCode !==
+        DisconnectReason.loggedOut;
 
       if (shouldReconnect) {
         console.log("🔄 Reconnecting...");
