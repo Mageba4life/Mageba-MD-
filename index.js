@@ -9,8 +9,6 @@ http.createServer((req, res) => {
   console.log(`🌐 Web server running on port ${PORT}`);
 });
 
-console.log("🚀 Mageba-MD starting...");
-
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -34,33 +32,7 @@ async function startBot() {
 
   sock.ev.on("creds.update", saveCreds);
 
-  /*
-   * WhatsApp pairing code
-   */
-  if (!state.creds.registered) {
-    if (!BOT_NUMBER) {
-      console.log("❌ BOT_NUMBER is missing.");
-      return;
-    }
-
-    try {
-      await new Promise(resolve => setTimeout(resolve, 3000));
-
-      const code = await sock.requestPairingCode(BOT_NUMBER);
-
-      console.log("");
-      console.log("=================================");
-      console.log("📱 WHATSAPP PAIRING CODE");
-      console.log("🔑 CODE:", code);
-      console.log("=================================");
-      console.log("");
-    } catch (error) {
-      console.log("❌ Could not generate pairing code:");
-      console.log(error.message);
-    }
-  }
-
-  sock.ev.on("connection.update", (update) => {
+  sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect } = update;
 
     if (connection === "open") {
@@ -79,46 +51,63 @@ async function startBot() {
       if (shouldReconnect) {
         console.log("🔄 Reconnecting...");
         setTimeout(startBot, 5000);
-      } else {
-        console.log("⚠️ WhatsApp logged out. Pair again.");
       }
     }
   });
 
   sock.ev.on("messages.upsert", async ({ messages }) => {
-    const msg = messages[0];
+    try {
+      const msg = messages?.[0];
 
-    if (!msg || !msg.message) return;
+      if (!msg || msg.key.fromMe || !msg.message) return;
 
-    const sender = (msg.key.participant || msg.key.remoteJid || "")
-      .split("@")[0]
-      .replace(/\D/g, "");
+      const jid = msg.key.remoteJid || "";
 
-    const text =
-      msg.message.conversation ||
-      msg.message.extendedTextMessage?.text ||
-      "";
+      const sender = (
+        msg.key.participant ||
+        jid ||
+        ""
+      ).split("@")[0].replace(/\D/g, "");
 
-    /*
-     * Only the OWNER_NUMBER can control the bot.
-     */
-    if (OWNER_NUMBER && sender !== OWNER_NUMBER) {
-      return;
-    }
+      const text =
+        msg.message.conversation ||
+        msg.message.extendedTextMessage?.text ||
+        msg.message.imageMessage?.caption ||
+        msg.message.videoMessage?.caption ||
+        "";
 
-    if (text === ".menu") {
-      await sock.sendMessage(msg.key.remoteJid, {
-        text:
-          "🤖 Mageba-MD Menu\n\n" +
-          ".menu\n" +
-          ".ping"
+      console.log("📩 Message received:", {
+        sender,
+        text
       });
-    }
 
-    if (text === ".ping") {
-      await sock.sendMessage(msg.key.remoteJid, {
-        text: "🏓 Pong! Bot is alive"
-      });
+      if (!OWNER_NUMBER) {
+        console.log("❌ OWNER_NUMBER is missing");
+        return;
+      }
+
+      if (sender !== OWNER_NUMBER) {
+        console.log("🚫 Message ignored: not owner");
+        return;
+      }
+
+      if (text.trim().toLowerCase() === ".ping") {
+        await sock.sendMessage(jid, {
+          text: "🏓 Pong! Mageba-MD is alive!"
+        });
+      }
+
+      if (text.trim().toLowerCase() === ".menu") {
+        await sock.sendMessage(jid, {
+          text:
+            "🤖 Mageba-MD Menu\n\n" +
+            ".ping - Test bot\n" +
+            ".menu - Show menu"
+        });
+      }
+
+    } catch (error) {
+      console.log("❌ Message handler error:", error);
     }
   });
 }
