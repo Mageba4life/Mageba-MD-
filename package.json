@@ -1,7 +1,7 @@
 {
   "name": "mageba-md",
   "version": "1.0.0",
-  "description": "My WhatsApp bot",
+  "description": "Mageba-MD WhatsApp bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
