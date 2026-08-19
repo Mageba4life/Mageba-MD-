@@ -4,6 +4,8 @@ const pino = require("pino");
 const {
   default: makeWASocket,
   useMultiFileAuthState,
+  fetchLatestWaWebVersion,
+  Browsers,
   DisconnectReason
 } = require("@whiskeysockets/baileys");
 
@@ -27,9 +29,6 @@ http.createServer((req, res) => {
 // NUMBERS
 // ===============================
 
-// BOT_NUMBER = WhatsApp number that will run the bot
-// OWNER_NUMBER = WhatsApp number allowed to control the bot
-
 const BOT_NUMBER = (process.env.BOT_NUMBER || "")
   .replace(/\D/g, "");
 
@@ -37,49 +36,89 @@ const OWNER_NUMBER = (process.env.OWNER_NUMBER || "")
   .replace(/\D/g, "");
 
 // ===============================
-// BOT STATE
+// BOT
 // ===============================
 
-let sock = null;
-let reconnecting = false;
-
-// ===============================
-// START BOT
-// ===============================
+let starting = false;
 
 async function startBot() {
 
-  if (reconnecting) {
-    return;
-  }
+  if (starting) return;
 
-  reconnecting = true;
+  starting = true;
 
   try {
 
     console.log("");
-    console.log("🚀 Starting Mageba-MD...");
+    console.log("🚀 Mageba-MD starting...");
 
-    // Load WhatsApp session
     const { state, saveCreds } =
       await useMultiFileAuthState("session");
 
-    sock = makeWASocket({
+    /*
+     * IMPORTANT:
+     * Get the current WhatsApp Web version.
+     * This avoids the stale bundled version problem.
+     */
+
+    let version;
+
+    try {
+
+      const latest =
+        await fetchLatestWaWebVersion({});
+
+      version = latest.version;
+
+      console.log(
+        "🌐 WhatsApp Web version:",
+        version.join(".")
+      );
+
+    } catch (error) {
+
+      console.log(
+        "⚠️ Could not fetch latest WhatsApp Web version."
+      );
+
+      console.log(
+        error.message
+      );
+    }
+
+    const socketOptions = {
+
       auth: state,
+
       logger: pino({
         level: "silent"
       }),
-      printQRInTerminal: false
-    });
 
-    // Save authentication credentials
+      printQRInTerminal: false,
+
+      /*
+       * Use a canonical browser identity.
+       * This is important for pairing-code validation.
+       */
+
+      browser: Browsers.macOS("Chrome")
+
+    };
+
+    if (version) {
+      socketOptions.version = version;
+    }
+
+    const sock =
+      makeWASocket(socketOptions);
+
     sock.ev.on(
       "creds.update",
       saveCreds
     );
 
     // ===============================
-    // PAIRING CODE
+    // PAIRING
     // ===============================
 
     if (!state.creds.registered) {
@@ -90,51 +129,51 @@ async function startBot() {
           "❌ BOT_NUMBER is missing."
         );
 
-      } else {
+        starting = false;
 
-        try {
+        return;
+      }
 
-          console.log(
-            "📱 Preparing WhatsApp pairing..."
+      console.log(
+        "📱 Preparing WhatsApp pairing..."
+      );
+
+      try {
+
+        await new Promise(resolve =>
+          setTimeout(resolve, 5000)
+        );
+
+        const code =
+          await sock.requestPairingCode(
+            BOT_NUMBER
           );
 
-          // Give the socket time to initialize
-          await new Promise(resolve =>
-            setTimeout(resolve, 5000)
-          );
+        console.log("");
+        console.log(
+          "================================="
+        );
+        console.log(
+          "📱 WHATSAPP PAIRING CODE"
+        );
+        console.log(
+          "🔑 CODE:",
+          code
+        );
+        console.log(
+          "================================="
+        );
+        console.log("");
 
-          const code =
-            await sock.requestPairingCode(
-              BOT_NUMBER
-            );
+      } catch (error) {
 
-          console.log("");
-          console.log(
-            "================================="
-          );
-          console.log(
-            "📱 WHATSAPP PAIRING CODE"
-          );
-          console.log(
-            "🔑 CODE:",
-            code
-          );
-          console.log(
-            "================================="
-          );
-          console.log("");
+        console.log(
+          "❌ Could not generate pairing code:"
+        );
 
-        } catch (error) {
-
-          console.log(
-            "❌ Pairing code error:"
-          );
-
-          console.log(
-            error.message
-          );
-        }
-
+        console.log(
+          error.message
+        );
       }
 
     } else {
@@ -150,24 +189,23 @@ async function startBot() {
 
     sock.ev.on(
       "connection.update",
-      async (update) => {
+      (update) => {
 
         const {
           connection,
           lastDisconnect
         } = update;
 
-        // Connected
         if (connection === "open") {
 
-          reconnecting = false;
+          starting = false;
 
           console.log("");
           console.log(
             "================================="
           );
           console.log(
-            "✅ Mageba-MD CONNECTED!"
+            "✅ MAGEBA-MD CONNECTED!"
           );
           console.log(
             "🤖 Bot:",
@@ -181,15 +219,15 @@ async function startBot() {
             "================================="
           );
           console.log("");
-
         }
 
-        // Disconnected
         if (connection === "close") {
 
           console.log(
             "❌ WhatsApp connection closed."
           );
+
+          starting = false;
 
           const statusCode =
             lastDisconnect?.error
@@ -206,23 +244,20 @@ async function startBot() {
             );
 
             console.log(
-              "⚠️ A new pairing is required."
+              "⚠️ Delete the session and pair again."
             );
-
-            reconnecting = false;
 
             return;
           }
-
-          reconnecting = false;
 
           console.log(
             "🔄 Reconnecting in 10 seconds..."
           );
 
-          setTimeout(() => {
-            startBot();
-          }, 10000);
+          setTimeout(
+            startBot,
+            10000
+          );
         }
       }
     );
@@ -237,34 +272,27 @@ async function startBot() {
 
         try {
 
-          const msg = messages?.[0];
+          const msg =
+            messages?.[0];
 
-          if (!msg) {
-            return;
-          }
-
-          // Ignore messages sent by the bot itself
-          if (msg.key.fromMe) {
-            return;
-          }
-
-          if (!msg.message) {
+          if (
+            !msg ||
+            msg.key.fromMe ||
+            !msg.message
+          ) {
             return;
           }
 
           const jid =
             msg.key.remoteJid || "";
 
-          // Get sender
           const sender = (
             msg.key.participant ||
-            jid ||
-            ""
+            jid
           )
             .split("@")[0]
             .replace(/\D/g, "");
 
-          // Get text
           const text =
             msg.message.conversation ||
             msg.message.extendedTextMessage
@@ -276,22 +304,11 @@ async function startBot() {
             "";
 
           const command =
-            text
-              .trim()
-              .toLowerCase();
-
-          console.log("");
-          console.log(
-            "📩 Message received"
-          );
+            text.trim().toLowerCase();
 
           console.log(
-            "👤 Sender:",
-            sender
-          );
-
-          console.log(
-            "💬 Message:",
+            "📩 Message received:",
+            sender,
             text
           );
 
@@ -313,7 +330,7 @@ async function startBot() {
           ) {
 
             console.log(
-              "🚫 Message ignored: sender is not owner."
+              "🚫 Message ignored: not owner."
             );
 
             return;
@@ -355,9 +372,9 @@ async function startBot() {
               jid,
               {
                 text:
-                  "🤖 *Mageba-MD Menu*\n\n" +
-                  "🏓 .ping\n" +
-                  "📋 .menu"
+                  "🤖 Mageba-MD Menu\n\n" +
+                  ".ping - Test bot\n" +
+                  ".menu - Show menu"
               }
             );
 
@@ -384,22 +401,19 @@ async function startBot() {
   } catch (error) {
 
     console.log(
-      "❌ Bot startup error:"
+      "❌ Startup error:"
     );
 
     console.log(
       error.message
     );
 
-    reconnecting = false;
+    starting = false;
 
-    console.log(
-      "🔄 Trying again in 10 seconds..."
+    setTimeout(
+      startBot,
+      10000
     );
-
-    setTimeout(() => {
-      startBot();
-    }, 10000);
   }
 }
 
@@ -410,7 +424,7 @@ async function startBot() {
 startBot();
 
 // ===============================
-// KEEP ALIVE LOG
+// KEEP ALIVE
 // ===============================
 
 setInterval(() => {
