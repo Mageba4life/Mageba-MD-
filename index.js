@@ -9,28 +9,51 @@ const {
 
 const PORT = process.env.PORT || 3000;
 
+// Your WhatsApp bot number
+const BOT_NUMBER = (process.env.BOT_NUMBER || "")
+  .replace(/\D/g, "");
+
+// Your owner number
+const OWNER_NUMBER = (process.env.OWNER_NUMBER || "")
+  .replace(/\D/g, "");
+
+// --------------------------------------------------
+// Render web server
+// --------------------------------------------------
+
 http.createServer((req, res) => {
   res.writeHead(200, {
     "Content-Type": "text/plain"
   });
-  res.end("Mageba-MD diagnostic bot is running!");
+
+  res.end("Mageba-MD is running!");
 }).listen(PORT, () => {
   console.log(`🌐 Web server running on port ${PORT}`);
 });
 
-const OWNER_NUMBER = (process.env.OWNER_NUMBER || "")
-  .replace(/\D/g, "");
+console.log("🚀 Mageba-MD starting...");
+console.log("🤖 Bot number:", BOT_NUMBER || "NOT SET");
+console.log("👑 Owner number:", OWNER_NUMBER || "NOT SET");
 
-let reconnectTimer = null;
+// --------------------------------------------------
+// Bot
+// --------------------------------------------------
+
+let reconnecting = false;
 
 async function startBot() {
+  if (reconnecting) return;
+
   try {
     console.log("");
-    console.log("🚀 Starting Mageba-MD diagnostic...");
-    console.log("👑 Owner:", OWNER_NUMBER || "NOT SET");
+    console.log("=================================");
+    console.log("🚀 STARTING WHATSAPP");
+    console.log("=================================");
 
-    const { state, saveCreds } =
-      await useMultiFileAuthState("session");
+    const {
+      state,
+      saveCreds
+    } = await useMultiFileAuthState("session");
 
     console.log(
       "🔐 Session registered:",
@@ -39,248 +62,131 @@ async function startBot() {
 
     const sock = makeWASocket({
       auth: state,
-      logger: pino({ level: "silent" }),
-      printQRInTerminal: false
+      logger: pino({
+        level: "silent"
+      }),
+      printQRInTerminal: false,
+      markOnlineOnConnect: true
     });
 
-    sock.ev.on("creds.update", saveCreds);
+    // Save WhatsApp credentials
+    sock.ev.on(
+      "creds.update",
+      saveCreds
+    );
 
-    // =================================
-    // CONNECTION
-    // =================================
+    // --------------------------------------------------
+    // Pairing code
+    // --------------------------------------------------
 
-    sock.ev.on("connection.update", (update) => {
-      console.log("🔌 CONNECTION EVENT:", {
-        connection: update.connection,
-        hasQR: !!update.qr,
-        isNewLogin: update.isNewLogin
-      });
+    if (!state.creds.registered) {
 
-      if (update.connection === "open") {
+      if (!BOT_NUMBER) {
         console.log("");
-        console.log("=================================");
-        console.log("✅ WHATSAPP CONNECTED");
-        console.log("=================================");
-        console.log("");
+        console.log("❌ BOT_NUMBER is missing.");
+        console.log(
+          "Add BOT_NUMBER in Render Environment Variables."
+        );
+        return;
       }
-
-      if (update.connection === "close") {
-        console.log("❌ CONNECTION CLOSED");
-
-        const status =
-          update.lastDisconnect?.error?.output?.statusCode;
-
-        console.log("Disconnect status:", status);
-
-        if (status === DisconnectReason.loggedOut) {
-          console.log("⚠️ WhatsApp logged out.");
-          return;
-        }
-
-        if (!reconnectTimer) {
-          reconnectTimer = setTimeout(() => {
-            reconnectTimer = null;
-            startBot();
-          }, 10000);
-        }
-      }
-    });
-
-    // =================================
-    // EVERY MESSAGE EVENT
-    // =================================
-
-    sock.ev.on("messages.upsert", async (event) => {
 
       console.log("");
-      console.log("=================================");
-      console.log("📩 MESSAGES.UPSERT EVENT RECEIVED");
-      console.log("Type:", event.type);
       console.log(
-        "Number of messages:",
-        event.messages?.length || 0
+        "📱 Preparing WhatsApp pairing..."
       );
-      console.log("=================================");
 
-      for (const msg of event.messages || []) {
+      try {
 
-        try {
+        // Give the socket time to initialize
+        await new Promise(resolve =>
+          setTimeout(resolve, 5000)
+        );
 
-          console.log("🔎 Message key:", {
-            id: msg.key?.id,
-            remoteJid: msg.key?.remoteJid,
-            fromMe: msg.key?.fromMe,
-            participant: msg.key?.participant
-          });
+        console.log(
+          "📱 Requesting pairing code..."
+        );
 
-          if (!msg.message) {
-            console.log("⚠️ Message has no message body.");
-            continue;
-          }
-
-          const jid =
-            msg.key?.remoteJid || "";
-
-          const sender = (
-            msg.key?.participant ||
-            jid
-          )
-            .split("@")[0]
-            .replace(/\D/g, "");
-
-          const text =
-            msg.message.conversation ||
-            msg.message.extendedTextMessage?.text ||
-            msg.message.imageMessage?.caption ||
-            msg.message.videoMessage?.caption ||
-            "";
-
-          console.log("👤 Sender:", sender);
-          console.log("💬 Text:", text);
-
-          // Ignore messages sent by the bot itself
-          if (msg.key?.fromMe) {
-            console.log("ℹ️ Ignoring own message.");
-            continue;
-          }
-
-          // =================================
-          // OWNER CHECK
-          // =================================
-
-          if (!OWNER_NUMBER) {
-            console.log(
-              "❌ OWNER_NUMBER environment variable is empty."
-            );
-            continue;
-          }
-
-          if (sender !== OWNER_NUMBER) {
-            console.log(
-              "🚫 Message received but sender is not owner."
-            );
-
-            console.log(
-              "Expected:",
-              OWNER_NUMBER
-            );
-
-            console.log(
-              "Received:",
-              sender
-            );
-
-            continue;
-          }
-
-          const command =
-            text.trim().toLowerCase();
-
-          // =================================
-          // PING
-          // =================================
-
-          if (command === ".ping") {
-
-            console.log("🏓 Processing .ping...");
-
-            await sock.sendMessage(jid, {
-              text:
-                "🏓 Pong!\n\n" +
-                "🤖 Mageba-MD is alive!"
-            });
-
-            console.log(
-              "✅ Pong message sent."
-            );
-          }
-
-          // =================================
-          // MENU
-          // =================================
-
-          if (command === ".menu") {
-
-            console.log("📋 Processing .menu...");
-
-            await sock.sendMessage(jid, {
-              text:
-                "🤖 Mageba-MD Menu\n\n" +
-                ".ping - Test bot\n" +
-                ".menu - Show menu"
-            });
-
-            console.log(
-              "✅ Menu message sent."
-            );
-          }
-
-        } catch (error) {
-
-          console.log(
-            "❌ Error processing message:"
+        const code =
+          await sock.requestPairingCode(
+            BOT_NUMBER
           );
 
-          console.log(
-            error.message
-          );
-        }
+        console.log("");
+        console.log(
+          "================================="
+        );
+        console.log(
+          "📱 WHATSAPP PAIRING CODE"
+        );
+        console.log(
+          "🔑 CODE:",
+          code
+        );
+        console.log(
+          "================================="
+        );
+        console.log("");
+        console.log(
+          "👉 On WhatsApp:"
+        );
+        console.log(
+          "Linked devices → Link a device → Link with phone number instead"
+        );
+        console.log(
+          "Then enter the code above."
+        );
+        console.log("");
+
+      } catch (error) {
+
+        console.log("");
+        console.log(
+          "❌ PAIRING CODE ERROR"
+        );
+        console.log(
+          error.message
+        );
+        console.log("");
+
       }
-    });
+    }
 
-    // =================================
-    // PRESENCE / CONTACT DEBUGGING
-    // =================================
+    // --------------------------------------------------
+    // Connection updates
+    // --------------------------------------------------
 
-    sock.ev.on("contacts.upsert", (contacts) => {
-      console.log(
-        "👥 CONTACTS EVENT:",
-        contacts?.length || 0
-      );
-    });
+    sock.ev.on(
+      "connection.update",
+      (update) => {
 
-    sock.ev.on("chats.upsert", (chats) => {
-      console.log(
-        "💬 CHATS EVENT:",
-        chats?.length || 0
-      );
-    });
+        const {
+          connection,
+          lastDisconnect
+        } = update;
 
-    sock.ev.on("chats.update", (chats) => {
-      console.log(
-        "🔄 CHATS UPDATE:",
-        chats?.length || 0
-      );
-    });
+        console.log(
+          "🔌 Connection:",
+          connection
+        );
 
-    sock.ev.on("presence.update", (update) => {
-      console.log(
-        "🟢 PRESENCE EVENT:",
-        update.id
-      );
-    });
+        if (connection === "open") {
 
-  } catch (error) {
+          reconnecting = false;
 
-    console.log(
-      "❌ STARTUP ERROR:"
-    );
-
-    console.log(
-      error.message
-    );
-
-    setTimeout(
-      startBot,
-      10000
-    );
-  }
-}
-
-startBot();
-
-setInterval(() => {
-  console.log(
-    "💚 Mageba-MD diagnostic service is running..."
-  );
-}, 60000);
+          console.log("");
+          console.log(
+            "================================="
+          );
+          console.log(
+            "✅ MAGEBA-MD CONNECTED!"
+          );
+          console.log(
+            "🤖 Bot:",
+            BOT_NUMBER
+          );
+          console.log(
+            "👑 Owner:",
+            OWNER_NUMBER
+          );
+          console.log(
+            "================================="
