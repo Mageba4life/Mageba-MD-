@@ -8,7 +8,7 @@ const {
 } = require("@whiskeysockets/baileys");
 
 // ===============================
-// RENDER WEB SERVER
+// RENDER SERVER
 // ===============================
 
 const PORT = process.env.PORT || 3000;
@@ -47,7 +47,6 @@ async function startBot() {
 
   try {
 
-    console.log("");
     console.log("🚀 Mageba-MD starting...");
 
     const {
@@ -65,7 +64,6 @@ async function startBot() {
       printQRInTerminal: false
     });
 
-    // Save authentication credentials
     sock.ev.on(
       "creds.update",
       saveCreds
@@ -87,12 +85,13 @@ async function startBot() {
         return;
       }
 
+      console.log(
+        "📱 Preparing WhatsApp pairing..."
+      );
+
       try {
 
-        console.log(
-          "📱 Preparing WhatsApp pairing..."
-        );
-
+        // Give the socket time to initialise
         await new Promise(resolve =>
           setTimeout(resolve, 5000)
         );
@@ -121,7 +120,7 @@ async function startBot() {
       } catch (error) {
 
         console.log(
-          "❌ Pairing-code error:"
+          "❌ Pairing code error:"
         );
 
         console.log(
@@ -176,11 +175,11 @@ async function startBot() {
 
         if (connection === "close") {
 
-          starting = false;
-
           console.log(
             "❌ WhatsApp connection closed."
           );
+
+          starting = false;
 
           const statusCode =
             lastDisconnect?.error
@@ -194,10 +193,6 @@ async function startBot() {
 
             console.log(
               "⚠️ WhatsApp logged out."
-            );
-
-            console.log(
-              "⚠️ Pair the account again."
             );
 
             return;
@@ -216,57 +211,34 @@ async function startBot() {
     );
 
     // ===============================
-    // MESSAGE LISTENER
+    // MESSAGE HANDLER
     // ===============================
 
     sock.ev.on(
       "messages.upsert",
-      async ({
-        messages,
-        type
-      }) => {
+      async ({ messages }) => {
 
         try {
 
-          console.log(
-            "📨 Message event:",
-            type,
-            "count:",
-            messages.length
-          );
-
-          for (
-            const msg of messages
-          ) {
+          for (const msg of messages || []) {
 
             if (
               !msg ||
+              msg.key?.fromMe ||
               !msg.message
             ) {
-              continue;
-            }
-
-            if (
-              msg.key.fromMe
-            ) {
-              console.log(
-                "ℹ️ Ignoring bot's own message."
-              );
-
               continue;
             }
 
             const jid =
               msg.key.remoteJid || "";
 
-            const senderJid =
+            const sender = (
               msg.key.participant ||
-              jid;
-
-            const sender =
-              senderJid
-                .split("@")[0]
-                .replace(/\D/g, "");
+              jid
+            )
+              .split("@")[0]
+              .replace(/\D/g, "");
 
             const text =
               msg.message.conversation ||
@@ -275,22 +247,17 @@ async function startBot() {
               msg.message.videoMessage?.caption ||
               "";
 
-            console.log(
-              "📩 INCOMING MESSAGE"
-            );
+            const command =
+              text.trim().toLowerCase();
 
             console.log(
-              "👤 Sender:",
-              sender
-            );
-
-            console.log(
-              "💬 Text:",
-              text
+              "📩 Message received:",
+              sender,
+              command
             );
 
             // ===============================
-            // OWNER CHECK
+            // OWNER ONLY
             // ===============================
 
             if (!OWNER_NUMBER) {
@@ -313,9 +280,6 @@ async function startBot() {
               continue;
             }
 
-            const command =
-              text.trim().toLowerCase();
-
             // ===============================
             // PING
             // ===============================
@@ -323,10 +287,6 @@ async function startBot() {
             if (
               command === ".ping"
             ) {
-
-              console.log(
-                "🏓 Processing .ping..."
-              );
 
               await sock.sendMessage(
                 jid,
@@ -338,7 +298,7 @@ async function startBot() {
               );
 
               console.log(
-                "✅ .ping reply sent."
+                "✅ .ping replied."
               );
 
               continue;
@@ -363,16 +323,9 @@ async function startBot() {
               );
 
               console.log(
-                "✅ .menu reply sent."
+                "✅ .menu replied."
               );
-
-              continue;
             }
-
-            console.log(
-              "ℹ️ Unknown command:",
-              command
-            );
           }
 
         } catch (error) {
@@ -391,7 +344,7 @@ async function startBot() {
   } catch (error) {
 
     console.log(
-      "❌ Bot startup error:"
+      "❌ Startup error:"
     );
 
     console.log(
@@ -414,7 +367,7 @@ async function startBot() {
 startBot();
 
 // ===============================
-// KEEP ALIVE LOG
+// KEEP ALIVE
 // ===============================
 
 setInterval(() => {
