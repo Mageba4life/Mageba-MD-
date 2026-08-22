@@ -7,331 +7,218 @@ const {
   DisconnectReason
 } = require("@whiskeysockets/baileys");
 
-// ===============================
-// RENDER SERVER
-// ===============================
-
 const PORT = process.env.PORT || 3000;
 
 http.createServer((req, res) => {
   res.writeHead(200, {
     "Content-Type": "text/plain"
   });
-
-  res.end("Mageba-MD is running!");
+  res.end("Mageba-MD diagnostic bot is running!");
 }).listen(PORT, () => {
   console.log(`🌐 Web server running on port ${PORT}`);
 });
 
-// ===============================
-// NUMBERS
-// ===============================
-
-const BOT_NUMBER = (process.env.BOT_NUMBER || "")
-  .replace(/\D/g, "");
-
 const OWNER_NUMBER = (process.env.OWNER_NUMBER || "")
   .replace(/\D/g, "");
 
-let starting = false;
-
-// ===============================
-// START BOT
-// ===============================
+let reconnectTimer = null;
 
 async function startBot() {
-
-  if (starting) return;
-
-  starting = true;
-
   try {
+    console.log("");
+    console.log("🚀 Starting Mageba-MD diagnostic...");
+    console.log("👑 Owner:", OWNER_NUMBER || "NOT SET");
 
-    console.log("🚀 Mageba-MD starting...");
+    const { state, saveCreds } =
+      await useMultiFileAuthState("session");
 
-    const {
-      state,
-      saveCreds
-    } = await useMultiFileAuthState("session");
+    console.log(
+      "🔐 Session registered:",
+      state.creds.registered
+    );
 
     const sock = makeWASocket({
       auth: state,
-
-      logger: pino({
-        level: "silent"
-      }),
-
+      logger: pino({ level: "silent" }),
       printQRInTerminal: false
     });
 
-    sock.ev.on(
-      "creds.update",
-      saveCreds
-    );
+    sock.ev.on("creds.update", saveCreds);
 
-    // ===============================
-    // PAIRING CODE
-    // ===============================
-
-    if (!state.creds.registered) {
-
-      if (!BOT_NUMBER) {
-
-        console.log(
-          "❌ BOT_NUMBER is missing."
-        );
-
-        starting = false;
-        return;
-      }
-
-      console.log(
-        "📱 Preparing WhatsApp pairing..."
-      );
-
-      try {
-
-        // Give the socket time to initialise
-        await new Promise(resolve =>
-          setTimeout(resolve, 5000)
-        );
-
-        const code =
-          await sock.requestPairingCode(
-            BOT_NUMBER
-          );
-
-        console.log("");
-        console.log(
-          "================================="
-        );
-        console.log(
-          "📱 WHATSAPP PAIRING CODE"
-        );
-        console.log(
-          "🔑 CODE:",
-          code
-        );
-        console.log(
-          "================================="
-        );
-        console.log("");
-
-      } catch (error) {
-
-        console.log(
-          "❌ Pairing code error:"
-        );
-
-        console.log(
-          error.message
-        );
-      }
-
-    } else {
-
-      console.log(
-        "✅ Existing WhatsApp session found."
-      );
-    }
-
-    // ===============================
+    // =================================
     // CONNECTION
-    // ===============================
+    // =================================
 
-    sock.ev.on(
-      "connection.update",
-      (update) => {
+    sock.ev.on("connection.update", (update) => {
+      console.log("🔌 CONNECTION EVENT:", {
+        connection: update.connection,
+        hasQR: !!update.qr,
+        isNewLogin: update.isNewLogin
+      });
 
-        const {
-          connection,
-          lastDisconnect
-        } = update;
+      if (update.connection === "open") {
+        console.log("");
+        console.log("=================================");
+        console.log("✅ WHATSAPP CONNECTED");
+        console.log("=================================");
+        console.log("");
+      }
 
-        if (connection === "open") {
+      if (update.connection === "close") {
+        console.log("❌ CONNECTION CLOSED");
 
-          starting = false;
+        const status =
+          update.lastDisconnect?.error?.output?.statusCode;
 
-          console.log("");
-          console.log(
-            "================================="
-          );
-          console.log(
-            "✅ MAGEBA-MD CONNECTED!"
-          );
-          console.log(
-            "🤖 Bot:",
-            BOT_NUMBER
-          );
-          console.log(
-            "👑 Owner:",
-            OWNER_NUMBER
-          );
-          console.log(
-            "================================="
-          );
-          console.log("");
+        console.log("Disconnect status:", status);
+
+        if (status === DisconnectReason.loggedOut) {
+          console.log("⚠️ WhatsApp logged out.");
+          return;
         }
 
-        if (connection === "close") {
-
-          console.log(
-            "❌ WhatsApp connection closed."
-          );
-
-          starting = false;
-
-          const statusCode =
-            lastDisconnect?.error
-              ?.output
-              ?.statusCode;
-
-          if (
-            statusCode ===
-            DisconnectReason.loggedOut
-          ) {
-
-            console.log(
-              "⚠️ WhatsApp logged out."
-            );
-
-            return;
-          }
-
-          console.log(
-            "🔄 Reconnecting in 10 seconds..."
-          );
-
-          setTimeout(
-            startBot,
-            10000
-          );
+        if (!reconnectTimer) {
+          reconnectTimer = setTimeout(() => {
+            reconnectTimer = null;
+            startBot();
+          }, 10000);
         }
       }
-    );
+    });
 
-    // ===============================
-    // MESSAGE HANDLER
-    // ===============================
+    // =================================
+    // EVERY MESSAGE EVENT
+    // =================================
 
-    sock.ev.on(
-      "messages.upsert",
-      async ({ messages }) => {
+    sock.ev.on("messages.upsert", async (event) => {
+
+      console.log("");
+      console.log("=================================");
+      console.log("📩 MESSAGES.UPSERT EVENT RECEIVED");
+      console.log("Type:", event.type);
+      console.log(
+        "Number of messages:",
+        event.messages?.length || 0
+      );
+      console.log("=================================");
+
+      for (const msg of event.messages || []) {
 
         try {
 
-          for (const msg of messages || []) {
+          console.log("🔎 Message key:", {
+            id: msg.key?.id,
+            remoteJid: msg.key?.remoteJid,
+            fromMe: msg.key?.fromMe,
+            participant: msg.key?.participant
+          });
 
-            if (
-              !msg ||
-              msg.key?.fromMe ||
-              !msg.message
-            ) {
-              continue;
-            }
+          if (!msg.message) {
+            console.log("⚠️ Message has no message body.");
+            continue;
+          }
 
-            const jid =
-              msg.key.remoteJid || "";
+          const jid =
+            msg.key?.remoteJid || "";
 
-            const sender = (
-              msg.key.participant ||
-              jid
-            )
-              .split("@")[0]
-              .replace(/\D/g, "");
+          const sender = (
+            msg.key?.participant ||
+            jid
+          )
+            .split("@")[0]
+            .replace(/\D/g, "");
 
-            const text =
-              msg.message.conversation ||
-              msg.message.extendedTextMessage?.text ||
-              msg.message.imageMessage?.caption ||
-              msg.message.videoMessage?.caption ||
-              "";
+          const text =
+            msg.message.conversation ||
+            msg.message.extendedTextMessage?.text ||
+            msg.message.imageMessage?.caption ||
+            msg.message.videoMessage?.caption ||
+            "";
 
-            const command =
-              text.trim().toLowerCase();
+          console.log("👤 Sender:", sender);
+          console.log("💬 Text:", text);
 
+          // Ignore messages sent by the bot itself
+          if (msg.key?.fromMe) {
+            console.log("ℹ️ Ignoring own message.");
+            continue;
+          }
+
+          // =================================
+          // OWNER CHECK
+          // =================================
+
+          if (!OWNER_NUMBER) {
             console.log(
-              "📩 Message received:",
-              sender,
-              command
+              "❌ OWNER_NUMBER environment variable is empty."
+            );
+            continue;
+          }
+
+          if (sender !== OWNER_NUMBER) {
+            console.log(
+              "🚫 Message received but sender is not owner."
             );
 
-            // ===============================
-            // OWNER ONLY
-            // ===============================
+            console.log(
+              "Expected:",
+              OWNER_NUMBER
+            );
 
-            if (!OWNER_NUMBER) {
+            console.log(
+              "Received:",
+              sender
+            );
 
-              console.log(
-                "❌ OWNER_NUMBER is missing."
-              );
+            continue;
+          }
 
-              continue;
-            }
+          const command =
+            text.trim().toLowerCase();
 
-            if (
-              sender !== OWNER_NUMBER
-            ) {
+          // =================================
+          // PING
+          // =================================
 
-              console.log(
-                "🚫 Message ignored: not owner."
-              );
+          if (command === ".ping") {
 
-              continue;
-            }
+            console.log("🏓 Processing .ping...");
 
-            // ===============================
-            // PING
-            // ===============================
+            await sock.sendMessage(jid, {
+              text:
+                "🏓 Pong!\n\n" +
+                "🤖 Mageba-MD is alive!"
+            });
 
-            if (
-              command === ".ping"
-            ) {
+            console.log(
+              "✅ Pong message sent."
+            );
+          }
 
-              await sock.sendMessage(
-                jid,
-                {
-                  text:
-                    "🏓 Pong!\n\n" +
-                    "🤖 Mageba-MD is alive!"
-                }
-              );
+          // =================================
+          // MENU
+          // =================================
 
-              console.log(
-                "✅ .ping replied."
-              );
+          if (command === ".menu") {
 
-              continue;
-            }
+            console.log("📋 Processing .menu...");
 
-            // ===============================
-            // MENU
-            // ===============================
+            await sock.sendMessage(jid, {
+              text:
+                "🤖 Mageba-MD Menu\n\n" +
+                ".ping - Test bot\n" +
+                ".menu - Show menu"
+            });
 
-            if (
-              command === ".menu"
-            ) {
-
-              await sock.sendMessage(
-                jid,
-                {
-                  text:
-                    "🤖 Mageba-MD Menu\n\n" +
-                    ".ping - Test bot\n" +
-                    ".menu - Show menu"
-                }
-              );
-
-              console.log(
-                "✅ .menu replied."
-              );
-            }
+            console.log(
+              "✅ Menu message sent."
+            );
           }
 
         } catch (error) {
 
           console.log(
-            "❌ Message handler error:"
+            "❌ Error processing message:"
           );
 
           console.log(
@@ -339,19 +226,49 @@ async function startBot() {
           );
         }
       }
-    );
+    });
+
+    // =================================
+    // PRESENCE / CONTACT DEBUGGING
+    // =================================
+
+    sock.ev.on("contacts.upsert", (contacts) => {
+      console.log(
+        "👥 CONTACTS EVENT:",
+        contacts?.length || 0
+      );
+    });
+
+    sock.ev.on("chats.upsert", (chats) => {
+      console.log(
+        "💬 CHATS EVENT:",
+        chats?.length || 0
+      );
+    });
+
+    sock.ev.on("chats.update", (chats) => {
+      console.log(
+        "🔄 CHATS UPDATE:",
+        chats?.length || 0
+      );
+    });
+
+    sock.ev.on("presence.update", (update) => {
+      console.log(
+        "🟢 PRESENCE EVENT:",
+        update.id
+      );
+    });
 
   } catch (error) {
 
     console.log(
-      "❌ Startup error:"
+      "❌ STARTUP ERROR:"
     );
 
     console.log(
       error.message
     );
-
-    starting = false;
 
     setTimeout(
       startBot,
@@ -360,20 +277,10 @@ async function startBot() {
   }
 }
 
-// ===============================
-// START
-// ===============================
-
 startBot();
 
-// ===============================
-// KEEP ALIVE
-// ===============================
-
 setInterval(() => {
-
   console.log(
-    "💚 Mageba-MD is still running..."
+    "💚 Mageba-MD diagnostic service is running..."
   );
-
 }, 60000);
